@@ -1,0 +1,23 @@
+[package]
+name = "bgg_swing2"
+version = "0.1.1"
+authors = ["wordtinker <wordtinker@yandex.ru>"]
+edition = "2018"
+
+[dependencies]
+structopt = "0.2.14"
+failure = "0.1.5"
+exitfailure ="0.5.1"
+serde = "1.0.86"
+serde_derive = "1.0.86"
+serde_json = "1.0.38"
+reqwest = "0.9.9"
+select = "0.4.2"
+chrono = "0.4.6"
+termcolor = "1.0.4"
+ctrlc = "3.1.1"
+threadpool = "1.7.1"
+
+[dependencies.rusqlite]
+version = "0.16.0"
+features = ["bundled"]
