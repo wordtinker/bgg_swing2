@@ -163,7 +163,7 @@ pub fn get_user_average_rating(client: &Client, user: &User) -> Result<f64, Erro
         .flat_map(|t| t.find(Name("tr"))).skip(2).take(1)
         .flat_map(|tr| tr.find(Name("td"))).nth(1);
     let rating = match rating {
-        None => bail!("Can't find rating element"),
+        None => bail!("Can't find rating element for {}", user),
         Some(r) => r.text().parse::<f64>()?
     };
     Ok(rating)

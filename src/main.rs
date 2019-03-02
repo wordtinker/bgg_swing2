@@ -72,7 +72,9 @@ fn stabilize() -> Result<(), Error> {
     // Prettify output a bit
     let mut stdout = StandardStream::stdout(ColorChoice::Always);
     let mut seen_users: u32 = 0;
+    let mut requests: u32 = 0;
     let mut balanced_games: u32 = 0;
+    let mut num_errs: u32 = 0;
     core::stabilize(config, running, |m| match m {
         Message::NoteUserProgress(_) => {
             seen_users += 1;
@@ -87,16 +89,19 @@ fn stabilize() -> Result<(), Error> {
             writeln!(&mut stdout, "{} is balanced.", game.name).unwrap();
         },
         Message::NoteErr(error) => {
+            num_errs += 1;
             stdout.set_color(ColorSpec::new().set_fg(Some(Color::Red))).unwrap();
             writeln!(&mut stdout, "{:?}", error).unwrap();
         },
         Message::NoteGameProgress(game) => {
+            requests += 1;
             stdout.set_color(ColorSpec::new().set_fg(Some(Color::Green))).unwrap();
             writeln!(&mut stdout, "About to ask BGG about {}", game.name).unwrap();
         },
         _ => {} 
     })?;
-    println!("Seen {} users today and {} balanced games.", seen_users, balanced_games);
+    println!("Seen {} users, {} balanced games, {} erorrs, {} game requests.",
+        seen_users, balanced_games, num_errs, requests);
     println!("Finished balancing.");
     Ok(())
 }
