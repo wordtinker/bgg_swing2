@@ -1,9 +1,9 @@
-use failure::{Error, ResultExt, bail};
+use crate::lib::{Game, User};
+use failure::{bail, Error, ResultExt};
 use reqwest::Client;
 use reqwest::StatusCode;
 use select::document::Document;
-use select::predicate::{Name, Class};
-use crate::lib::{Game, User};
+use select::predicate::{Class, Name};
 
 pub const USER_PAGE_SIZE: u32 = 100;
 
@@ -14,10 +14,17 @@ pub fn get_users_from(client: &Client, game_id: u32, page: u32) -> Result<Vec<(U
         page,
         USER_PAGE_SIZE
     );
-    let resp = client.get(&url).send()
+    let resp = client
+        .get(&url)
+        .send()
         .with_context(|_| format!("could not download page `{}`", url))?;
     if resp.status() != StatusCode::OK {
-        bail!("Can't get page {} for {}. Status: {}", page, game_id, resp.status());
+        bail!(
+            "Can't get page {} for {}. Status: {}",
+            page,
+            game_id,
+            resp.status()
+        );
     }
     let doc = Document::from_read(resp)?;
     filter_users(doc)
@@ -30,11 +37,11 @@ fn filter_users(doc: Document) -> Result<Vec<(User, f64)>, Error> {
     for tag in usertags {
         let name = match tag.attr("username") {
             Some(n) => String::from(n),
-            _ => bail!("Can't parse username in the user list")
+            _ => bail!("Can't parse username in the user list"),
         };
         let rating = match tag.attr("rating") {
             Some(r) => r.parse::<f64>()?,
-            _ => bail!("Can't parse user rating in the user list")
+            _ => bail!("Can't parse user rating in the user list"),
         };
         users.push((name, rating));
     }
@@ -45,12 +52,17 @@ pub struct GameIterator<'a> {
     client: &'a Client,
     page: u32,
     user_limit: u32,
-    seen: Option<Game>
+    seen: Option<Game>,
 }
 
 impl<'a> GameIterator<'a> {
     pub fn new(client: &'a Client, user_limit: u32) -> GameIterator {
-        GameIterator {client, page: 0 , user_limit, seen: None}
+        GameIterator {
+            client,
+            page: 0,
+            user_limit,
+            seen: None,
+        }
     }
 }
 
@@ -68,8 +80,8 @@ impl<'a> Iterator for GameIterator<'a> {
                     self.seen = Some(games[0].clone());
                     Some(Ok(games))
                 }
-            },
-            Err(e) => Some(Err(e))
+            }
+            Err(e) => Some(Err(e)),
         }
     }
 }
@@ -80,7 +92,9 @@ fn get_games_from(client: &Client, page: u32, user_limit: u32) -> Result<Vec<Gam
         page,
         user_limit
     );
-    let resp = client.get(&url).send()
+    let resp = client
+        .get(&url)
+        .send()
         .with_context(|_| format!("could not download page `{}`", url))?;
     if resp.status() != StatusCode::OK {
         bail!("Can't get games from {}", page);
@@ -92,7 +106,8 @@ fn get_games_from(client: &Client, page: u32, user_limit: u32) -> Result<Vec<Gam
 fn filter_games(doc: Document) -> Result<Vec<Game>, Error> {
     let rows = doc
         .find(Class("collection_table"))
-        .flat_map(|c| c.find(Name("tr"))).skip(1); // skip header
+        .flat_map(|c| c.find(Name("tr")))
+        .skip(1); // skip header
 
     let mut games = Vec::new();
     for row in rows {
@@ -105,25 +120,25 @@ fn filter_games(doc: Document) -> Result<Vec<Game>, Error> {
         let link = match link {
             Some(node) => match node.find(Name("a")).nth(0) {
                 Some(l) => l,
-                None => bail!("Could not find game link.")
+                None => bail!("Could not find game link."),
             },
-            None => bail!("Could not find game link.") 
+            None => bail!("Could not find game link."),
         };
         let id = match link.attr("href") {
             Some(href) => href_to_id(href)?,
-            None => bail!("Could not find game id.")
+            None => bail!("Could not find game id."),
         };
-        let bgg_geek_rating = match bgg_geek_rating{
+        let bgg_geek_rating = match bgg_geek_rating {
             Some(node) => node.text().trim().parse::<f64>()?,
-            None => bail!("Could not find geek rating.")
+            None => bail!("Could not find geek rating."),
         };
-        let bgg_avg_rating = match bgg_avg_rating{
+        let bgg_avg_rating = match bgg_avg_rating {
             Some(node) => node.text().trim().parse::<f64>()?,
-            None => bail!("Could not find avg rating.")
+            None => bail!("Could not find avg rating."),
         };
-        let bgg_num_votes = match bgg_num_votes{
+        let bgg_num_votes = match bgg_num_votes {
             Some(node) => node.text().trim().parse::<u32>()?,
-            None => bail!("Could not find num votes.")
+            None => bail!("Could not find num votes."),
         };
 
         games.push(Game {
@@ -134,7 +149,7 @@ fn filter_games(doc: Document) -> Result<Vec<Game>, Error> {
             bgg_num_votes,
             bgg_geek_rating,
             bgg_avg_rating,
-            page: 1
+            page: 1,
         });
     }
     Ok(games)
@@ -144,27 +159,36 @@ fn href_to_id(href: &str) -> Result<u32, Error> {
     let parts: Vec<&str> = href.rsplit('/').take(2).collect();
     let id = match parts.get(1) {
         Some(x) => x.parse::<u32>()?,
-        None => bail!("Can't parse id of the game: {}", href)
+        None => bail!("Can't parse id of the game: {}", href),
     };
     Ok(id)
 }
 
 pub fn get_user_average_rating(client: &Client, user: &User) -> Result<f64, Error> {
-    let url =  format!("https://boardgamegeek.com/user/{}", user);
-    let resp = client.get(&url).send()
+    let url = format!("https://boardgamegeek.com/user/{}", user);
+    let resp = client
+        .get(&url)
+        .send()
         .with_context(|_| format!("could not download page `{}`", url))?;
     if resp.status() != StatusCode::OK {
         bail!("Can't get user average for {}", user);
     }
     let doc = Document::from_read(resp)?;
     let rating = doc
-        .find(Class("profile_block")).skip(3).take(1)
-        .flat_map(|pb| pb.find(Name("table"))).skip(5).take(1)
-        .flat_map(|t| t.find(Name("tr"))).skip(2).take(1)
-        .flat_map(|tr| tr.find(Name("td"))).nth(1);
+        .find(Class("profile_block"))
+        .skip(3)
+        .take(1)
+        .flat_map(|pb| pb.find(Name("table")))
+        .skip(5)
+        .take(1)
+        .flat_map(|t| t.find(Name("tr")))
+        .skip(2)
+        .take(1)
+        .flat_map(|tr| tr.find(Name("td")))
+        .nth(1);
     let rating = match rating {
         None => bail!("Can't find rating element for {}", user),
-        Some(r) => r.text().parse::<f64>()?
+        Some(r) => r.text().parse::<f64>()?,
     };
     Ok(rating)
 }

@@ -1,19 +1,19 @@
-use crate::db;
 use crate::bgg;
+use crate::db;
 use crate::lib::{Game, User};
-use failure::{Error, ResultExt, ensure};
-use std::fs;
+use failure::{ensure, Error, ResultExt};
+use reqwest::Client;
+use serde_derive::{Deserialize, Serialize};
 use serde_json::{from_str, to_string_pretty};
-use serde_derive::{Serialize, Deserialize};
-use std::thread;
+use std::collections::HashMap;
+use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
-use std::time::Duration;
-use reqwest::Client;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use threadpool::ThreadPool;
-use std::collections::HashMap;
 
 const CONFIG_FILE_NAME: &str = "app.config";
 const LOWER_BOUND: f64 = 2.0;
@@ -59,9 +59,13 @@ fn trust(rating: f64) -> bool {
 /// Err => Unrecoverable error, no signal sent
 /// None => bgg is busy, must ask again later
 /// Hashmap => got info on every user
-fn check_users<'a>(tx: &Sender<Message>, conn: &db::DbConn, client: &Client, tkn: &mut RegulationToken,
-        users: &'a [(User, f64)]) -> Result<Option<HashMap<&'a User, bool>>, Error> {
-    
+fn check_users<'a>(
+    tx: &Sender<Message>,
+    conn: &db::DbConn,
+    client: &Client,
+    tkn: &mut RegulationToken,
+    users: &'a [(User, f64)],
+) -> Result<Option<HashMap<&'a User, bool>>, Error> {
     let mut user_map: HashMap<&User, bool> = HashMap::new();
     for (user, _) in users {
         // check if we have seen user already
@@ -74,8 +78,8 @@ fn check_users<'a>(tx: &Sender<Message>, conn: &db::DbConn, client: &Client, tkn
                         tx.send(Message::NoteErr(e)).unwrap();
                         tkn.harden(); // wait a bit longer before next request
                         return Ok(None);
-                    },
-                    Ok(rate) => rate
+                    }
+                    Ok(rate) => rate,
                 };
                 // save user to db
                 let trusted = trust(rating);
@@ -88,11 +92,13 @@ fn check_users<'a>(tx: &Sender<Message>, conn: &db::DbConn, client: &Client, tkn
                         user_map.insert(user, trusted);
                     }
                 }
-            },
+            }
             // seen already, memorize
-            Ok(Some(v)) => { user_map.insert(user, v); },
+            Ok(Some(v)) => {
+                user_map.insert(user, v);
+            }
             // Error, no signal sent
-            Err(e) => return Err(e)
+            Err(e) => return Err(e),
         };
     }
     // we have info on every user
@@ -103,8 +109,13 @@ fn check_users<'a>(tx: &Sender<Message>, conn: &db::DbConn, client: &Client, tkn
 /// None => bgg is busy, must ask again later
 /// true => last page has been reached
 /// false => need to dig deeper
-fn check_game(tx: &Sender<Message>, conn: &db::DbConn, client: &Client,
-        tkn: &mut RegulationToken, game: &mut Game) -> Result<Option<bool>, Error> {
+fn check_game(
+    tx: &Sender<Message>,
+    conn: &db::DbConn,
+    client: &Client,
+    tkn: &mut RegulationToken,
+    game: &mut Game,
+) -> Result<Option<bool>, Error> {
     // ask for user ratings
     tx.send(Message::NoteGameProgress(game.clone())).unwrap();
     let user_page = bgg::get_users_from(&client, game.id, game.page);
@@ -114,7 +125,7 @@ fn check_game(tx: &Sender<Message>, conn: &db::DbConn, client: &Client,
             tx.send(Message::NoteErr(e)).unwrap();
             // get to the next loop iter
             return Ok(None); // need to reiterate
-        },
+        }
         Ok(vec) => {
             tkn.ease();
             vec
@@ -130,7 +141,7 @@ fn check_game(tx: &Sender<Message>, conn: &db::DbConn, client: &Client,
     let user_map = check_users(tx, conn, client, tkn, &users)?;
     let user_map = match user_map {
         None => return Ok(None), // need to reiterate, http failed
-        Some(m) => m
+        Some(m) => m,
     };
     for (user, rating) in users.iter() {
         if user_map.get(user) == Some(&true) {
@@ -147,11 +158,11 @@ fn check_game(tx: &Sender<Message>, conn: &db::DbConn, client: &Client,
 fn runner(config: Config, running: Arc<AtomicBool>, tx: Sender<Message>, mut game: Game) -> () {
     // Configure thread
     let conn = match db::DbConn::new() {
-            Err(e) => {
-                tx.send(Message::DieErr(e)).unwrap();
-                return;
-            },
-            Ok(cn) => cn
+        Err(e) => {
+            tx.send(Message::DieErr(e)).unwrap();
+            return;
+        }
+        Ok(cn) => cn,
     };
     let client = Client::new();
     let delay_step = Duration::from_millis(config.delay as u64);
@@ -177,7 +188,7 @@ fn runner(config: Config, running: Arc<AtomicBool>, tx: Sender<Message>, mut gam
                 // propagate error
                 tx.send(Message::DieErr(e)).unwrap();
                 return;
-            },
+            }
             Ok(None) => continue, // recoverable err occured, skip to the next iteration
             Ok(Some(false)) => {
                 // update game data
@@ -185,39 +196,44 @@ fn runner(config: Config, running: Arc<AtomicBool>, tx: Sender<Message>, mut gam
                     Err(e) => {
                         tx.send(Message::DieErr(e)).unwrap();
                         return;
-                    },
-                    Ok(()) => continue // gathered some data, skip to the next iteration
+                    }
+                    Ok(()) => continue, // gathered some data, skip to the next iteration
                 };
-            },
-            Ok(Some(true)) => {// gathered all data
+            }
+            Ok(Some(true)) => {
+                // gathered all data
                 // update game data
                 match conn.update_game(&game, true) {
                     Err(e) => {
                         tx.send(Message::DieErr(e)).unwrap();
                         return;
-                    },
-                    Ok(()) => tx.send(Message::DieResult(game)).unwrap()
+                    }
+                    Ok(()) => tx.send(Message::DieResult(game)).unwrap(),
                 };
-                return
+                return;
             }
         };
     }
 }
 
-pub fn stabilize(config: Config, running: Arc<AtomicBool>, mut progress: impl FnMut(Message) -> ()) -> Result<(), Error> {
-     // NB. Errors from mpsc channels use unwrap(). If channels fail,
-     // the core of the programm is severely damaged, panic is the only option. 
-    
+pub fn stabilize(
+    config: Config,
+    running: Arc<AtomicBool>,
+    mut progress: impl FnMut(Message) -> (),
+) -> Result<(), Error> {
+    // NB. Errors from mpsc channels use unwrap(). If channels fail,
+    // the core of the programm is severely damaged, panic is the only option.
+
     // Channel for communication
     let (tx, rx) = mpsc::channel();
     let pool = ThreadPool::new(config.threads);
 
-    let games = db::get_unstable_games()?; 
+    let games = db::get_unstable_games()?;
     let job_size = games.len();
     for game in games {
         let tx = tx.clone();
         let running = running.clone();
-        pool.execute(move || runner(config, running, tx, game) );
+        pool.execute(move || runner(config, running, tx, game));
     }
 
     // This will block main until iterator yields None
@@ -232,15 +248,18 @@ pub fn stabilize(config: Config, running: Arc<AtomicBool>, mut progress: impl Fn
                 running.store(false, Ordering::SeqCst);
                 result = Err(e);
                 finished += 1;
-            },
+            }
             Message::DieResult(game) => {
                 finished += 1;
                 progress(Message::DieResult(game));
-            },
-            Message::DieInterrupt => finished += 1, 
-            msg => progress(msg)
+            }
+            Message::DieInterrupt => finished += 1,
+            msg => progress(msg),
         }
-        if finished == job_size { break; } // every thread died somehow
+        if finished == job_size {
+            // every thread died somehow
+            break;
+        }
     }
     pool.join();
     result
@@ -255,26 +274,31 @@ pub fn config() -> Result<Config, Error> {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Config {
-    pub limit: u32, // number or user ratings for a game
-    pub attempts: u32, // number or errors that thread can handle before stop
-    pub delay: u32, // ms, delay increase after every failure
-    pub threads: usize // number of threads
+    pub limit: u32,     // number or user ratings for a game
+    pub attempts: u32,  // number or errors that thread can handle before stop
+    pub delay: u32,     // ms, delay increase after every failure
+    pub threads: usize, // number of threads
 }
 
 impl Config {
     fn new(limit: u32, attempts: u32, delay: u32, threads: usize) -> Config {
-        Config {limit, attempts, delay, threads}
+        Config {
+            limit,
+            attempts,
+            delay,
+            threads,
+        }
     }
 }
 
 #[derive(Debug)]
 pub enum Message {
-    DieErr(Error), // thread must stop after that message
+    DieErr(Error),   // thread must stop after that message
     DieResult(Game), // thread must stop after that message
-    DieInterrupt, // thread must stop after that message
+    DieInterrupt,    // thread must stop after that message
     NoteErr(Error),
     NoteUserProgress(User),
-    NoteGameProgress(Game)
+    NoteGameProgress(Game),
 }
 
 struct RegulationToken {
@@ -285,7 +309,11 @@ struct RegulationToken {
 
 impl RegulationToken {
     fn new(limit: u32, delay_step: Duration) -> RegulationToken {
-        RegulationToken { limit, delay_step, i: 0 }
+        RegulationToken {
+            limit,
+            delay_step,
+            i: 0,
+        }
     }
     fn delay(&self) -> Duration {
         self.delay_step * self.i
@@ -305,12 +333,12 @@ impl RegulationToken {
 
 struct Avg {
     n: u32,
-    val: f64
+    val: f64,
 }
 
 impl Avg {
     fn new(n: u32, val: f64) -> Avg {
-        Avg {n, val}
+        Avg { n, val }
     }
     fn add(&mut self, nmbr: f64) -> () {
         self.n += 1;
